@@ -61,9 +61,16 @@ void Capture::depth_recovery(Mat3x4 P0, Mat3x4 P1)
         mask.push_back(false);
       }
     }
+    else
+    {
+      mask.push_back(false);
+    }
+
   }
+
   reduceVector_Vec2(kp_2d,mask);
   reduceVector_cvMat(kp_descriptor,mask);
+
 }
 
 
