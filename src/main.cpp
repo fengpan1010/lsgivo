@@ -12,6 +12,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
 
 //STDLIB
 #include <sstream>
@@ -38,6 +39,7 @@ using namespace std;
 
 Capture* curr_capture;
 Capture* prev_capture;
+Capture* kf_capture;
 cv::Mat K0;
 cv::Mat c0_RM[2],c1_RM[2];
 Mat3x4 P0,P1;
@@ -45,6 +47,9 @@ Mat3x4 P0,P1;
 ros::Publisher triangulation_result_pub;
 image_transport::Publisher vo_img0_pub,vo_img1_pub,vo_matching_pub;
 ros::Publisher odom_pub;
+ros::Publisher path_pub;
+nav_msgs::Path path;
+
 bool is_first_capture;
 SE3 T_w_c0;
 PointCloudP_ptr pc_map;
@@ -78,11 +83,29 @@ void publish_tf(SE3 T_w_c0_in, ros::Time stamp){
   odom.pose.pose.orientation.z= T_w_c0_in.so3().unit_quaternion().z();
   odom.pose.pose.orientation.w= T_w_c0_in.so3().unit_quaternion().w();
 
-  //set the velocity
+  //TODO::set the velocity
+
   odom.child_frame_id = "camera0";
   //publish the message
   odom_pub.publish(odom);
 
+  //publish the path message over ROS
+  geometry_msgs::PoseStamped pose;
+  pose.header.stamp = stamp;
+  pose.header.frame_id = "world";
+  //set the position
+  pose.pose.position.x = T_w_c0_in.translation().x();
+  pose.pose.position.y = T_w_c0_in.translation().y();
+  pose.pose.position.z = T_w_c0_in.translation().z();
+  pose.pose.orientation.x= T_w_c0_in.so3().unit_quaternion().x();
+  pose.pose.orientation.y= T_w_c0_in.so3().unit_quaternion().y();
+  pose.pose.orientation.z= T_w_c0_in.so3().unit_quaternion().z();
+  pose.pose.orientation.w= T_w_c0_in.so3().unit_quaternion().w();
+  path.header.stamp = stamp;
+  path.header.frame_id = "world";
+  path.poses.push_back(pose);
+  //publish the message
+  path_pub.publish(path);
 }
 
 
@@ -104,8 +127,16 @@ void callback(const ImageConstPtr& img0_msg, const ImageConstPtr& img1_msg)
     //init
     curr_capture->detection();
     curr_capture->depth_recovery(P0,P1);
+    kf_capture = curr_capture;
     is_first_capture = false;
-    T_w_c0=SE3(SO3(0,0,0),Vec3(0,0,0));
+    Mat3x3 R_w_c0;
+    // 0  0  1
+    //-1  0  0
+    // 0 -1  0
+    R_w_c0 << 0, 0, 1, -1, 0, 0, 0,-1, 0;
+    Vec3   t_w_c=Vec3(0,0,0);
+    SE3    T_w_c(R_w_c0,t_w_c);
+    T_w_c0=SE3(R_w_c0,t_w_c);
   }else
   {
     //match between curr and prev
@@ -136,6 +167,7 @@ void callback(const ImageConstPtr& img0_msg, const ImageConstPtr& img1_msg)
     cv::Mat img_match;
     drawMatches ( prev_capture->img_0, prev_capture->get_kp(),
                   curr_capture->img_0, curr_capture->get_kp(), good_matches, img_match);
+
     //Pose Estimation
     //Creat 3D-2D Pairs
     vector<Vec3> prev_3d;
@@ -210,6 +242,9 @@ void callback(const ImageConstPtr& img0_msg, const ImageConstPtr& img1_msg)
   curr_capture = prev_capture;
   prev_capture = temp;
 
+  kf_capture = curr_capture;
+
+
 
 }
 
@@ -279,7 +314,7 @@ int main(int argc, char **argv)
   triangulation_result_pub = nh.advertise<sensor_msgs::PointCloud2>("/triangulation_result", 1);
 
   odom_pub = nh.advertise<nav_msgs::Odometry>("odom", 50);
-
+  path_pub = nh.advertise<nav_msgs::Path>("path", 50);
 
   is_first_capture = true;
   curr_capture = new Capture();
