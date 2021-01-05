@@ -36,10 +36,9 @@ using namespace message_filters;
 using namespace std;
 
 
-
-Capture* curr_capture;
-Capture* prev_capture;
-Capture* kf_capture;
+unique_ptr<Capture> curr_capture;
+unique_ptr<Capture> prev_capture;
+unique_ptr<Capture> keyframe_capture;
 cv::Mat K0;
 cv::Mat c0_RM[2],c1_RM[2];
 Mat3x4 P0,P1;
@@ -51,7 +50,6 @@ ros::Publisher path_pub;
 nav_msgs::Path path;
 
 bool is_first_capture;
-SE3 T_w_c0;
 PointCloudP_ptr pc_map;
 
 void publish_tf(SE3 T_w_c0_in, ros::Time stamp){
@@ -127,8 +125,6 @@ void callback(const ImageConstPtr& img0_msg, const ImageConstPtr& img1_msg)
     //init
     curr_capture->detection();
     curr_capture->depth_recovery(P0,P1);
-    kf_capture = curr_capture;
-    is_first_capture = false;
     Mat3x3 R_w_c0;
     // 0  0  1
     //-1  0  0
@@ -136,52 +132,86 @@ void callback(const ImageConstPtr& img0_msg, const ImageConstPtr& img1_msg)
     R_w_c0 << 0, 0, 1, -1, 0, 0, 0,-1, 0;
     Vec3   t_w_c=Vec3(0,0,0);
     SE3    T_w_c(R_w_c0,t_w_c);
-    T_w_c0=SE3(R_w_c0,t_w_c);
+    curr_capture->T_w_c=SE3(R_w_c0,t_w_c);
+    *keyframe_capture = *curr_capture;
+    is_first_capture = false;
   }else
   {
-    //match between curr and prev
+    // match between curr and keyframe
+    cout << endl << "match between curr and keyframe" << endl;
+
     curr_capture->detection();
     cv::Ptr<cv::DescriptorMatcher>   matcher    = cv::DescriptorMatcher::create ( "BruteForce-Hamming" );
     vector<cv::DMatch> matches;
-    cv::Mat d_curr, d_prev;
+    std::vector< cv::DMatch > good_matches;
+    cv::Mat d_curr, d_keyframe;
 
-    vMat_to_descriptors(prev_capture->kp_descriptor, d_prev);
+    cout << "keyframe_capture->kp_2d.size()" << keyframe_capture->kp_2d.size() << endl;
+    cout << "keyframe_capture->kp_3d.size()" << keyframe_capture->kp_3d.size() << endl;
+    cout << "keyframe_capture->kp_descriptor.size()" << keyframe_capture->kp_descriptor.size() << endl;
+    cout << "curr_capture->kp_2d.size()" << curr_capture->kp_2d.size() << endl;
+    cout << "curr_capture->kp_3d.size()" << curr_capture->kp_3d.size() << endl;
+    cout << "curr_capture->kp_descriptor.size()" << curr_capture->kp_descriptor.size() << endl;
+    vMat_to_descriptors(keyframe_capture->kp_descriptor, d_keyframe);
     vMat_to_descriptors(curr_capture->kp_descriptor, d_curr);
-
-    matcher->match ( d_prev, d_curr, matches );
+    matcher->match (d_keyframe, d_curr, matches);
     double min_dist=10000, max_dist=0;
-    for ( int i = 0; i < d_prev.rows; i++ )
-    {
+    for ( int i = 0; i < d_keyframe.rows; i++ ){
       double dist = matches[i].distance;
       if ( dist < min_dist ) min_dist = dist;
       if ( dist > max_dist ) max_dist = dist;
     }
-    std::vector< cv::DMatch > good_matches;
-    for ( int i = 0; i < d_prev.rows; i++ )
-    {
-      if ( matches[i].distance <= max ( 2*min_dist, 20.0 ) )
-      {
+    good_matches.clear();
+    for ( int i = 0; i < d_keyframe.rows; i++ ){
+      if ( matches[i].distance <= max ( 2*min_dist, 30.0 ) ){
         good_matches.push_back ( matches[i] );
       }
     }
-    cv::Mat img_match;
-    drawMatches ( prev_capture->img_0, prev_capture->get_kp(),
-                  curr_capture->img_0, curr_capture->get_kp(), good_matches, img_match);
+    cout << "goodmatch " << good_matches.size() << endl;
 
+    //match between curr and prev
+    if (good_matches.size() <= 50)
+    {
+      cout << "use last frame as keyframe ----" << endl;
+      // update keyframe
+      *keyframe_capture = *prev_capture;
+      vMat_to_descriptors(keyframe_capture->kp_descriptor, d_keyframe);
+      vMat_to_descriptors(curr_capture->kp_descriptor, d_curr);
+      matcher->match (d_keyframe, d_curr, matches);
+      double min_dist=10000, max_dist=0;
+      for ( int i = 0; i < d_keyframe.rows; i++ ){
+        double dist = matches[i].distance;
+        if ( dist < min_dist ) min_dist = dist;
+        if ( dist > max_dist ) max_dist = dist;
+      }
+      good_matches.clear();
+      for ( int i = 0; i < d_keyframe.rows; i++ ){
+        if ( matches[i].distance <= max ( 2*min_dist, 30.0 ) ){
+          good_matches.push_back ( matches[i] );
+        }
+      }
+      cout << "goodmatch " << good_matches.size() << endl;
+    }
+    cout << "2d-2d matching finished "<< endl;
+    cv::Mat img_match;
+    drawMatches ( keyframe_capture->img_0, keyframe_capture->get_kp(),
+                  curr_capture->img_0, curr_capture->get_kp(), good_matches, img_match);
+    cout << "draw match finished "<< endl;
     //Pose Estimation
     //Creat 3D-2D Pairs
-    vector<Vec3> prev_3d;
+    vector<Vec3> keyframe_3d;
     vector<cv::KeyPoint> curr_2d;
     for(auto a_match:good_matches)
     {
-      prev_3d.push_back(prev_capture->kp_3d.at(a_match.queryIdx));
+      keyframe_3d.push_back(keyframe_capture->kp_3d.at(a_match.queryIdx));
       curr_2d.push_back(curr_capture->kp_2d.at(a_match.trainIdx));
     }
-    vector<cv::Point3f> prev_3d_cv;
+    cout << "extract pt-pairs finished "<< endl;
+    vector<cv::Point3f> keyframe_3d_cv;
     vector<cv::Point2f> curr_2d_cv;
-    for(size_t i=0; i<prev_3d.size(); i++)
+    for(size_t i=0; i<keyframe_3d.size(); i++)
     {
-      prev_3d_cv.push_back(cv::Point3f(prev_3d.at(i).x(),prev_3d.at(i).y(),prev_3d.at(i).z()));
+      keyframe_3d_cv.push_back(cv::Point3f(keyframe_3d.at(i).x(),keyframe_3d.at(i).y(),keyframe_3d.at(i).z()));
       curr_2d_cv.push_back(curr_2d.at(i).pt);
     }
 
@@ -189,16 +219,16 @@ void callback(const ImageConstPtr& img0_msg, const ImageConstPtr& img1_msg)
     cv::Mat rvec;
     cv::Mat tvec;
     cv::Mat inliers;
-    cv::solvePnPRansac(prev_3d_cv,curr_2d_cv, K0, no_dist, rvec, tvec, false, 100,3.0,0.99,inliers,cv::SOLVEPNP_P3P);
-    SE3 T_c0curr_c0prev = SE3_from_rvec_tvec(rvec,tvec);
-    cout << T_c0curr_c0prev.translation().transpose() << endl;
+    cv::solvePnPRansac(keyframe_3d_cv,curr_2d_cv, K0, no_dist, rvec, tvec, false, 100,3.0,0.99,inliers,cv::SOLVEPNP_P3P);
+    SE3 T_c0curr_c0keyframe = SE3_from_rvec_tvec(rvec,tvec);
+    cout << T_c0curr_c0keyframe.translation().transpose() << endl;
 
-    //Calculate T_w_c0curr with given T_w_c0prev and T_c0curr_c0prev
-    SE3 T_w_c0prev = T_w_c0;
-    SE3 T_w_c0curr = T_w_c0prev * T_c0curr_c0prev.inverse();
-    T_w_c0 = T_w_c0curr;
+    //Calculate T_w_c0curr with given T_w_c0keyframe and T_c0curr_c0keyframe
+    SE3 T_w_c0keyframe =keyframe_capture->T_w_c;
+    SE3 T_w_c0curr = T_w_c0keyframe * T_c0curr_c0keyframe.inverse();
+    curr_capture->T_w_c=T_w_c0curr;
 
-    publish_tf(T_w_c0,img0_msg->header.stamp);
+    publish_tf(T_w_c0curr,img0_msg->header.stamp);
     //Depth recovery
     curr_capture->depth_recovery(P0,P1);
 
@@ -206,7 +236,7 @@ void callback(const ImageConstPtr& img0_msg, const ImageConstPtr& img1_msg)
     for(size_t i=0; i<curr_capture->kp_3d.size(); i++)
     {
       //convert from camera to world
-      Vec3 kp_3d_w= T_w_c0*curr_capture->kp_3d.at(i);
+      Vec3 kp_3d_w= T_w_c0curr*curr_capture->kp_3d.at(i);
 
       pc_map->points.push_back (PointP(kp_3d_w[0],kp_3d_w[1],kp_3d_w[2]));
     }
@@ -238,13 +268,10 @@ void callback(const ImageConstPtr& img0_msg, const ImageConstPtr& img1_msg)
     vo_matching_pub.publish(vis_matching_msg);
   }
 
-  Capture* temp = curr_capture;
-  curr_capture = prev_capture;
-  prev_capture = temp;
-
-  kf_capture = curr_capture;
-
-
+  curr_capture.swap(prev_capture);
+  curr_capture->kp_2d.clear();
+  curr_capture->kp_3d.clear();
+  curr_capture->kp_descriptor.clear();
 
 }
 
@@ -317,9 +344,9 @@ int main(int argc, char **argv)
   path_pub = nh.advertise<nav_msgs::Path>("path", 50);
 
   is_first_capture = true;
-  curr_capture = new Capture();
-  prev_capture = new Capture();
-
+  curr_capture = unique_ptr<Capture>(new Capture());
+  prev_capture = unique_ptr<Capture>(new Capture());
+  keyframe_capture = unique_ptr<Capture>(new Capture());
 
   message_filters::Subscriber<Image> image0_sub(nh, "/cam0/image_raw" , 1);
   message_filters::Subscriber<Image> image1_sub(nh, "/cam1/image_raw", 1);

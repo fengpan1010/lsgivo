@@ -22,6 +22,7 @@ public:
   vector<cv::KeyPoint>     kp_2d;
   vector<Vec3>     kp_3d;
   vector<cv::Mat>  kp_descriptor;
+  SE3 T_w_c;
 
   Capture();
   void detection();
