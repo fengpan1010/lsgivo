@@ -10,6 +10,7 @@
 
 
 #include <pcl/point_types.h>
+#include <pcl/io/pcd_io.h>
 #include <pcl/point_cloud.h>
 
 #include <opencv2/opencv.hpp>
@@ -196,6 +197,14 @@ inline void reduceVector_cvMat(vector<cv::Mat> &v, vector<unsigned char> status)
     v.resize(j);
 }
 
+inline void reduceVector_cvKP(vector<cv::KeyPoint> &v, vector<unsigned char> status)
+{
+    int j = 0;
+    for (int i = 0; i < int(v.size()); i++)
+        if (status[i])
+            v[j++] = v[i];
+    v.resize(j);
+}
 
 
 #endif // COMMON_H

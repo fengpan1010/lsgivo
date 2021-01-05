@@ -19,7 +19,7 @@ class Capture
 public:
   cv::Mat img_0, img_1;
   cv::Mat img_0_out, img_1_out;
-  vector<Vec2>     kp_2d;
+  vector<cv::KeyPoint>     kp_2d;
   vector<Vec3>     kp_3d;
   vector<cv::Mat>  kp_descriptor;
 

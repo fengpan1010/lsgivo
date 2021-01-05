@@ -12,6 +12,9 @@ find_package (Eigen3 REQUIRED)
 find_package (PCL REQUIRED)
 find_package (Sophus REQUIRED)
 find_package (yaml-cpp REQUIRED)
+
+add_definitions( ${PCL_DEFINITIONS} )
+
 find_package (catkin REQUIRED COMPONENTS
     roscpp
     rospy
@@ -56,6 +59,7 @@ target_link_libraries(vo
     ${OpenCV_LIBRARIES}
     ${CSPARSE_LIBRARY}
     ${Sophus_LIBRARIES}
-    ${YAML_CPP_LIBRARIES})
+    ${YAML_CPP_LIBRARIES}
+    ${PCL_LIBRARIES})
 
 

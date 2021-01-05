@@ -7,23 +7,33 @@ Capture::Capture()
 
 void Capture::detection()
 {
-  std::vector<cv::KeyPoint> kp0;
   cv::Mat descriptorsMat;
-  cv::Ptr<cv::FeatureDetector>     detector   = cv::ORB::create(1500);
-  cv::Ptr<cv::DescriptorExtractor> descriptor = cv::ORB::create(1500);
-  detector->detect(img_0, kp0);
-  descriptor->compute ( img_0, kp0, descriptorsMat );
+  cv::Ptr<cv::FeatureDetector>     detector   = cv::ORB::create(3000,1.2f, 2, 31, 0,2, cv::ORB::HARRIS_SCORE, 31,10);
+  cv::Ptr<cv::DescriptorExtractor> descriptor = cv::ORB::create(3000,1.2f, 2, 31, 0,2, cv::ORB::HARRIS_SCORE, 31,10);
+  detector->detect(img_0, kp_2d);
 
-  //update kp_2d, kp_descriptor
-  kp_2d.clear();
-  kp_descriptor.clear();
-  for(auto item:kp0)
-  {
-    kp_2d.push_back(Vec2(item.pt.x,item.pt.y));
+  vector<cv::KeyPoint>  voxel[25];
+
+  int x_step=img_0.cols/5;
+  int y_step=img_0.rows/5;
+  for (auto item:kp_2d){
+    int idx_x = item.pt.x/x_step;
+    int idx_y = item.pt.y/y_step;
+    int dims  = idx_x + idx_y*5;
+    if ( voxel[dims].size()<20){
+      voxel[dims].push_back(item);
+    }
   }
+
+  kp_2d.clear();
+  for(size_t i=0; i<25; i++){
+    kp_2d.insert( kp_2d.end(), voxel[i].begin(), voxel[i].end() );
+  }
+
+  descriptor->compute ( img_0, kp_2d, descriptorsMat );
   descriptors_to_vMat(descriptorsMat, kp_descriptor);
   //vis
-  cv::drawKeypoints(img_0, kp0, img_0_out, cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
+  cv::drawKeypoints(img_0, kp_2d, img_0_out, cv::Scalar::all(-1), cv::DrawMatchesFlags::DEFAULT);
 }
 
 void Capture::depth_recovery(Mat3x4 P0, Mat3x4 P1)
@@ -31,7 +41,7 @@ void Capture::depth_recovery(Mat3x4 P0, Mat3x4 P1)
   std::vector<cv::Point2f> p0,p1;
   for (auto item:kp_2d)
   {
-    p0.push_back(cv::Point2f(item.x(),item.y()));
+    p0.push_back(item.pt);
   }
   vector<unsigned char> status;
   vector<float> err;
@@ -68,18 +78,12 @@ void Capture::depth_recovery(Mat3x4 P0, Mat3x4 P1)
 
   }
 
-  reduceVector_Vec2(kp_2d,mask);
+  reduceVector_cvKP(kp_2d,mask);
   reduceVector_cvMat(kp_descriptor,mask);
 
 }
 
-
 vector<cv::KeyPoint> Capture::get_kp(void)
 {
-  vector<cv::KeyPoint> ret;
-  for(auto item:kp_2d)
-  {
-    ret.push_back(cv::KeyPoint(item.x(),item.y(),1));
-  }
-  return ret;
+  return kp_2d;
 }
