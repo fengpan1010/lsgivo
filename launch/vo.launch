@@ -5,6 +5,7 @@
     <node pkg="rosbag" type="play" name="rosbag" output="log" args="$(find lsgivo)/bag/V1_01_easy.bag -s10 --clock">
     </node>
 
+    <param name="/para_lsgivo_config_file_path" type="string" value="$(find lsgivo)/launch/vo.yaml"/>
     <node pkg="lsgivo" type="vo" name="vo_test" output="screen">
     </node>
 

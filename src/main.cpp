@@ -218,7 +218,9 @@ int main(int argc, char **argv)
   ros::init(argc, argv, "vision_node");
   ros::NodeHandle nh;
 
-  string config_file_path = "/home/pp/catkin_ws/src/lsgivo/launch/vo.yaml";
+  string config_file_path;
+  nh.getParam("/para_lsgivo_config_file_path",   config_file_path);
+
   cv::Mat K0_distorted,K1_distorted;
   cv::Mat distCoeffs_0,distCoeffs_1;
   K0_distorted = cameraMatrixFromYamlIntrinsics(config_file_path,"cam0_K");
